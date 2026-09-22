@@ -1,0 +1,19 @@
+name: "GitHub Tunnel"
+version: "1.0.0"
+slug: "github_tunnel"
+description: "Quick Tunnel da Cloudflare + atualização no GitHub Pages."
+arch:
+  - aarch64
+  - armv7
+  - amd64
+init: false
+startup: application
+boot: auto
+options:
+  github_token: ""
+  github_repo: ""
+  target: "http://homeassistant:80"
+schema:
+  github_token: str
+  github_repo: str
+  target: str
