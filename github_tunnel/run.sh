@@ -157,8 +157,8 @@ monitora_tunel(){
     while kill -0 "$CF_PID" 2>/dev/null; do
         sleep "$sleep_time"
 
-        local req_status
-        req_status=$(curl -s -m 15 -0 /dev/null -w "%{http_code}" "$TUNNEL_URL" || echo "000")
+        local http_status
+        http_status=$(curl -s -m 15 -0 /dev/null -w "%{http_code}" "$TUNNEL_URL" || echo "000")
 
         if ["$http_status" -ge 200] && ["$http_status" -lt 500]; then
             failures = 0
