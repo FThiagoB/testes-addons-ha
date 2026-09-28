@@ -168,7 +168,7 @@ monitora_tunel(){
             http_status="000"
         fi
 
-        if ["$http_status" -ge 200] && ["$http_status" -lt 500]; then
+        if [ "$http_status" -ge 200 ] && [ "$http_status" -lt 500 ]; then
             failures=0
         
         else
@@ -176,7 +176,7 @@ monitora_tunel(){
             bashio::log.warning "Não foi possível acessar o túnel. HTTP $http_status ($failures/$max_failures)."
         fi
 
-        if ["$failures" -ge "$max_failures"]; then
+        if [ "$failures" -ge "$max_failures" ]; then
             bashio::log.error "Túnel indisponível... Resetando..."
             return 1
         fi
