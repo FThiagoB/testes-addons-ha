@@ -147,20 +147,58 @@ start_tunnel() {
     return 1
 }
 
+monitora(){
+    local max_failures = 3
+    local failures = 0
+    local sleep_time = 60
+
+    bashio::log.info "Monitorando a URL: $TUNNEL_URL"
+
+    while kill -0 "$CF_PID" 2>/dev/null; do
+        sleep "$sleep_time"
+
+        local req_status
+        req_status=$(curl -s -m 15 -0 /dev/null -w "%{http_code}" "$TUNNEL_URL" || echo "000")
+
+        if ["$http_status" -ge 200] && ["$http_status" -lt 500]; then
+            failures = 0
+        
+        else
+            failures=$((failures + 1))
+            bashio::log.warning "Não foi possível acessar o túnel. HTTP $http_status ($failures/$max_failures)."
+        fi
+
+        if ["$failures" -ge "$max_failures"]; then
+            bashio::log.error "Túnel indisponível... Resetando..."
+            return 1
+        fi
+    done
+
+    bashio::log.warning "Cloudflared encerrado inesperadamente";
+    return 1
+}
+
 main() {
-    if ! check_internet; then
-        exit 1
-    fi
+    while true; do
+        if ! check_internet; then
+            sleep 60
+            continue
+        fi
 
-    if ! start_tunnel; then
-        exit 1
-    fi
+        if start_tunnel; then
+            if !update_github "$TUNNEL_URL"; then
+                bashio::log.warning "Falha ao atualizar o Github"
+            fi
 
-    if ! update_github "$TUNNEL_URL"; then
-        bashio::log.warning "Falha ao atualizar GitHub. O túnel continua ativo."
-    fi
+            monitor_tunnel || true
+        fi
 
-    wait "$CF_PID"
+        bashio::log.info "Limpando o processo"
+        kill "$CF_PID" 2>/dev/null || true
+        wait "$CF_PID" 2>/dev/null || true
+        
+        sleep 10
+    done
 }
 
 main
