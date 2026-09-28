@@ -148,9 +148,9 @@ start_tunnel() {
 }
 
 monitora_tunel(){
-    local max_failures = 3
-    local failures = 0
-    local sleep_time = 60
+    local max_failures=3
+    local failures=0
+    local sleep_time=60
 
     bashio::log.info "Monitorando a URL: $TUNNEL_URL"
 
