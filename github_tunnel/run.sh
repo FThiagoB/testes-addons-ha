@@ -147,7 +147,7 @@ start_tunnel() {
     return 1
 }
 
-monitora(){
+monitora_tunel(){
     local max_failures = 3
     local failures = 0
     local sleep_time = 60
@@ -186,11 +186,11 @@ main() {
         fi
 
         if start_tunnel; then
-            if !update_github "$TUNNEL_URL"; then
+            if ! update_github "$TUNNEL_URL"; then
                 bashio::log.warning "Falha ao atualizar o Github"
             fi
 
-            monitor_tunnel || true
+            monitora_tunel || true
         fi
 
         bashio::log.info "Limpando o processo"
