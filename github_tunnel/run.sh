@@ -169,7 +169,7 @@ monitora_tunel(){
         fi
 
         if ["$http_status" -ge 200] && ["$http_status" -lt 500]; then
-            failures = 0
+            failures=0
         
         else
             failures=$((failures + 1))
