@@ -158,7 +158,15 @@ monitora_tunel(){
         sleep "$sleep_time"
 
         local http_status
-        http_status=$(curl -s -m 15 -0 /dev/null -w "%{http_code}" "$TUNNEL_URL" || echo "000")
+		local raw_status
+		
+        raw_status=$(curl -s -m 15 -o /dev/null -w "%{http_code}" "$TUNNEL_URL" 2>/dev/null || echo "000")
+		
+		http_status=$(echo "$raw_status" | grep -oE '[0-9]{3}' | tail -n1)
+		
+		if [ -z "$http_status" ]; then
+            http_status="000"
+        fi
 
         if ["$http_status" -ge 200] && ["$http_status" -lt 500]; then
             failures = 0
