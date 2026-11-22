@@ -16,6 +16,7 @@ ingress: true
 ingress_port: 8099
 panel_icon: "mdi:door-closed-lock"
 panel_title: "ControlID"
+host_network: true
 
 options:
   device_ip: "192.168.1.100"

@@ -2,6 +2,22 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 
+// DEBUG: IP é alcançável?
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+
+const execFileAsync = promisify(execFile);
+
+function log(level, msg) {
+  const ts = new Date().toISOString();
+  const line = `[${ts}] [${level}] ${msg}`;
+  if (level === 'ERROR') {
+    console.error(line);
+  } else {
+    console.log(line);
+  }
+}
+
 // Cria uma API para o frontend chamar, normalizando o acesso à API do controlid
 const app = express();
 const PORT = 8099;
@@ -111,6 +127,9 @@ async function getValidSession(config) {
       signal: AbortSignal.timeout(5000),
     });
   } catch (err) {
+    const detail = err.cause ? `${err.cause.code} (${err.cause.message})` : err.message;
+    log('ERROR', `Falha de socket no login.fcgi (${baseUrl}): ${detail}`);
+      
     // Lança o erro customizado
     throw new DeviceApiError(
       `Não foi possível conectar ao equipamento em ${config.device_ip}. Verifique o IP e a rede.`,
@@ -288,12 +307,72 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// TODO: Pesquisar sobre isso
+app.use((req, res, next) => {
+  const remoteIp = req.socket.remoteAddress || '';
+  const isAllowed =
+    remoteIp.includes('172.30.32.2') || // IP oficial do proxy Ingress no HAOS
+    remoteIp.includes('127.0.0.1') ||   // Testes locais (IPv4)
+    remoteIp.includes('::1');           // Testes locais (IPv6)
+
+  if (!isAllowed) {
+    log('ERROR', `Acesso direto bloqueado fora do Ingress vindo de: ${remoteIp}`);
+    return res.status(403).json({ error: 'Acesso permitido apenas via Home Assistant Ingress.' });
+  }
+  next();
+});
+
 // Inicializa o servidor
 app.listen(PORT, () => {
   const cfg = getAddonConfig();
-  console.log(
-    `ControlID Addon rodando na porta ${PORT} | Modo: ${
-      cfg.use_mock ? 'MOCK' : `REAL (${cfg.device_ip})`
-    }`
-  );
+  log('INFO', `ControlID Addon rodando na porta ${PORT} | Modo: ${cfg.use_mock ? 'MOCK' : 'REAL'}`);
+  runNetworkDiagnostics(cfg);
 });
+
+//////////////////////////////////////////////////////////////////////////////////////
+
+async function runCommand(cmd, args) {
+  try {
+    const { stdout, stderr } = await execFileAsync(cmd, args, { timeout: 10000 });
+    return (stdout || stderr).trim();
+  } catch (err) {
+    return (err.stdout || err.stderr || err.message).trim();
+  }
+}
+
+async function runNetworkDiagnostics(config) {
+  log('INFO', `Alvo configurado -> IP: ${config.device_ip} | Login: ${config.device_login} | Mock: ${config.use_mock}`);
+
+  // Interfaces e tabela de rotas do container
+  const routes = await runCommand('ip', ['route']);
+  log('DEBUG', `Tabela de rotas do container:\n${routes}`);
+
+  // Teste de Ping no Gateway
+  const parts = config.device_ip.split('.');
+  if (parts.length === 4) {
+    const gatewayIp = `${parts[0]}.${parts[1]}.${parts[2]}.1`;
+    const pingGw = await runCommand('ping', ['-c', '2', '-W', '2', gatewayIp]);
+    log('DEBUG', `Ping Gateway (${gatewayIp}):\n${pingGw}`);
+  }
+
+  const pingDevice = await runCommand('ping', ['-c', '3', '-W', '2', config.device_ip]);
+  log('DEBUG', `Ping Control iD (${config.device_ip}):\n${pingDevice}`);
+
+  // Traceroute sem resolução DNS (-n) para ver onde o pacote para
+  const trace = await runCommand('traceroute', ['-n', '-w', '2', '-m', '10', config.device_ip]);
+  log('DEBUG', `Traceroute até ${config.device_ip}:\n${trace}`);
+
+  // Teste HTTP na porta 80
+  try {
+    const res = await fetch(`http://${config.device_ip}:80/`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(4000),
+    });
+    log('INFO', `Teste HTTP porta 80 respondeu com status: HTTP ${res.status}`);
+  } catch (err) {
+    const cause = err.cause ? `${err.cause.code || ''} - ${err.cause.message || ''}` : err.message;
+    log('ERROR', `Teste HTTP porta 80 falhou: ${cause}`);
+  }
+
+  log('INFO', '================ FIM DO DIAGNÓSTICO DE REDE ==================');
+}

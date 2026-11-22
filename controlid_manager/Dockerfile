@@ -11,6 +11,9 @@ RUN npm run build
 # Backend usando node.js
 FROM node:20-alpine
 WORKDIR /app
+
+RUN apk add --no-cache iputils traceroute iproute2
+
 COPY backend/package*.json ./
 RUN npm install --omit=dev
 COPY backend/server.js ./
