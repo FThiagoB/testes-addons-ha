@@ -10,13 +10,20 @@ const execFileAsync = promisify(execFile);
 
 function log(level, msg) {
   const ts = new Date().toISOString();
-  const line = `[${ts}] [${level}] ${msg}`;
-  if (level === 'ERROR') {
-    console.error(line);
-  } else {
-    console.log(line);
-  }
+  const line = `[${ts}] [${level}] ${msg}\n`;
+
+  // Escrita síncrona direta em stdout (1) e stderr (2) sem buffer
+  fs.writeSync(level === 'ERROR' ? 2 : 1, line);
 }
+
+process.on('uncaughtException', (err) => {
+  log('ERROR', `Erro fatal na inicialização: ${err.stack || err.message}`);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  log('ERROR', `Promise rejeitada: ${reason?.stack || reason}`);
+});
 
 // Cria uma API para o frontend chamar, normalizando o acesso à API do controlid
 const app = express();
@@ -323,11 +330,28 @@ app.use((req, res, next) => {
 });
 
 // Inicializa o servidor
-app.listen(PORT, () => {
+const server =  app.listen(PORT, () => {
   const cfg = getAddonConfig();
   log('INFO', `ControlID Addon rodando na porta ${PORT} | Modo: ${cfg.use_mock ? 'MOCK' : 'REAL'}`);
   runNetworkDiagnostics(cfg);
 });
+
+// Encerramento
+function shutdown(signal) {
+  log('INFO', `Sinal ${signal} recebido. Encerrando servidor ControlID...`);
+  if (typeof server.closeAllConnections === 'function') {
+    server.closeAllConnections();
+  }
+  server.close(() => {
+    log('INFO', 'Servidor encerrado com sucesso.');
+    process.exit(0);
+  });
+
+  setTimeout(() => process.exit(0), 3000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 //////////////////////////////////////////////////////////////////////////////////////
 
