@@ -9,11 +9,13 @@ const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
 
 function log(level, msg) {
-  const ts = new Date().toISOString();
-  const line = `[${ts}] [${level}] ${msg}\n`;
+  const line = `[${new Date().toISOString()}] [${level}] ${msg}\n`;
 
-  // Escrita síncrona direta em stdout (1) e stderr (2) sem buffer
-  fs.writeSync(level === 'ERROR' ? 2 : 1, line);
+  try {
+    fs.writeSync(level === 'ERROR' ? 2 : 1, line);
+  } catch {
+    console.log(line.trim());
+  }
 }
 
 process.on('uncaughtException', (err) => {
@@ -24,6 +26,10 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
   log('ERROR', `Promise rejeitada: ${reason?.stack || reason}`);
 });
+
+log('INFO', 'Processo Node.js iniciado. Carregando configurações...');
+
+////////////////////////////////////////////////////////////////////////////////////////////
 
 // Cria uma API para o frontend chamar, normalizando o acesso à API do controlid
 const app = express();
