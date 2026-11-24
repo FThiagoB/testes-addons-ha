@@ -1,5 +1,5 @@
 name: "ControlID Manager"
-version: "1.0.0"
+version: "1.0.1"
 slug: "controlid_manager"
 description: "Addon de teste para abstrair o consumo da API do ControlID pelo RBP"
 arch:
@@ -22,10 +22,8 @@ options:
   device_ip: "192.168.1.100"
   device_login: "root"
   device_password: ""
-  use_mock: true
 
 schema:
   device_ip: "str"
   device_login: "str"
   device_password: "password"
-  use_mock: "bool?"

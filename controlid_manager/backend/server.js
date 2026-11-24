@@ -35,11 +35,23 @@ log('INFO', 'Processo Node.js iniciado. Carregando configurações...');
 const app = express();
 const PORT = 8099;
 
-// Todo: Remover o mock depois do teste
-const FORCE_MOCK_MODE = null;
+// https://www.controlid.com.br/docs/access-api-pt/reconhecimento-facial/cadastro-facial/
+const FACE_ERROR_MESSAGES = {
+  1: 'Parâmetros inválidos ou formato de imagem não reconhecido (use JPG ou PNG).',
+  2: 'Nenhum rosto foi identificado na imagem enviada.',
+  3: 'Este rosto já está cadastrado para outro usuário.',
+  4: 'Rosto muito descentralizado na imagem.',
+  5: 'Rosto muito pequeno / distante da câmera.',
+  6: 'Rosto muito grande / próximo demais da câmera.',
+  7: 'Rosto inclinado ou mal posicionado em relação à câmera.',
+  8: 'Nitidez insuficiente na imagem para reconhecimento facial.',
+  9: 'Rosto muito próximo das bordas da imagem.',
+};
 
-// pela documentação da API, normalmente é tudo JSON
-app.use(express.json());
+// https://stackoverflow.com/questions/19917401/error-request-entity-too-large
+app.use(express.json({limit: '50mb'}));
+app.use(express.urlencoded({limit: '50mb'}));
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Obtendo os dados de configuração do addon
@@ -61,39 +73,23 @@ function getAddonConfig() {
 
   return {
     ...fileConfig,
-    use_mock:
-      FORCE_MOCK_MODE !== null ? FORCE_MOCK_MODE : Boolean(fileConfig.use_mock),
   };
 }
 
+function enrichFaceErrors(errors = []) {
+  return errors.map((err) => {
+    let friendlyMessage = FACE_ERROR_MESSAGES[err.code] || err.message || 'Erro ao validar face.';
+    if (err.code === 3 && err.info?.match_user_id) {
+      friendlyMessage = `Este rosto já pertence ao usuário ID ${err.info.match_user_id}.`;
+    }
+    return {
+      ...err,
+      friendlyMessage,
+    };
+  });
+}
 
 let cachedSession = null;
-
-// Alguns dados para testar fora do lab
-// TODO: Remover depois dos testes
-let mockUsers = [
-  {
-    id: 1001,
-    name: 'Carlos Eduardo Silva',
-    last_access: Math.floor(Date.now() / 1000) - 3600,
-    user_type_id: null,
-    registration: 'MAT-2026-01',
-  },
-  {
-    id: 1002,
-    name: 'Mariana Costa',
-    last_access: Math.floor(Date.now() / 1000) - 86400,
-    user_type_id: null,
-    registration: 'MAT-2026-02',
-  },
-  {
-    id: 1003,
-    name: 'Roberto Almeida',
-    last_access: Math.floor(Date.now() / 1000) - 7200,
-    user_type_id: 1,
-    registration: 'VIS-904',
-  },
-];
 
 // classe customizada para o error
 class DeviceApiError extends Error {
@@ -151,8 +147,7 @@ async function getValidSession(config) {
     );
   }
 
-  // TODO: Verificar se o equipamento retorna HTTP status de erro ou é apenas o JSON de erro com HTTP 200
-  if (loginRes.status === 401 || loginRes.status === 403) {
+  if (loginRes.status === 401) {
     throw new DeviceApiError(
       'Credenciais inválidas no Control iD. Verifique o login e a senha na aba Configuração do Add-on.',
       401,
@@ -183,11 +178,14 @@ async function getValidSession(config) {
 }
 
 // Função generica para chamar uma rota
-async function callDeviceApi(endpoint, payload) {
+async function callDeviceApi(endpoint, payload, params="") {
   const config = getAddonConfig();
   const session = await getValidSession(config);
-  const url = `http://${config.device_ip}/${endpoint}?session=${session}`;
-
+  var url = `http://${config.device_ip}/${endpoint}?session=${session}`;
+  
+  if(params)
+    url = `http://${config.device_ip}/${endpoint}?session=${session}&${params}`;
+  
   let response;
   try {
     response = await fetch(url, {
@@ -197,6 +195,7 @@ async function callDeviceApi(endpoint, payload) {
       signal: AbortSignal.timeout(6000),
     });
   } catch (err) {
+    console.log( err );
     throw new DeviceApiError(
       `Falha de comunicação ao chamar ${endpoint} no equipamento.`,
       502,
@@ -226,29 +225,372 @@ function handleApiError(res, error) {
 }
 
 // =========================================================================================================
+async function syncUserCredentialObject({objectName, originalId, targetUserId, newValue}){
+  const searchIds = originalId === targetUserId ? [targetUserId] : [originalId, targetUserId];
+
+  const existingRes = await callDeviceApi('load_objects.fcgi', {
+    object: objectName,
+    where: {
+      [objectName]: { user_id: searchIds },
+    },
+  });
+
+  const existingList = existingRes?.[objectName] || [];
+  const hasNewValue = newValue !== null && newValue !== undefined && String(newValue).trim() !== '';
+
+  // Campo foi limpo no formulário
+  if (!hasNewValue) {
+    if (existingList.length > 0) {
+      await callDeviceApi('destroy_objects.fcgi', {
+        object: objectName,
+        where: {
+          [objectName]: { user_id: searchIds },
+        },
+      });
+    }
+    return;
+  }
+
+  if (existingList.length > 0) {
+    const primaryRecord = existingList[0];
+
+    await callDeviceApi('modify_objects.fcgi', {
+      object: objectName,
+      values: {
+        value: newValue,
+        user_id: targetUserId,
+      },
+      where: {
+        [objectName]: { id: primaryRecord.id },
+      },
+    });
+
+    if (existingList.length > 1) {
+      const extraIds = existingList.slice(1).map((item) => item.id);
+      await callDeviceApi('destroy_objects.fcgi', {
+        object: objectName,
+        where: {
+          [objectName]: { id: extraIds },
+        },
+      });
+    }
+    return;
+  }
+
+  await callDeviceApi('create_objects.fcgi', {
+    object: objectName,
+    values: [
+      {
+        value: newValue,
+        user_id: targetUserId,
+      },
+    ],
+  });
+}
+
+async function syncUserAdminRole({ originalId, targetUserId, isAdmin }) {
+  const searchIds = originalId === targetUserId ? [targetUserId] : [originalId, targetUserId];
+
+  const rolesRes = await callDeviceApi('load_objects.fcgi', {
+    object: 'user_roles',
+    where: {
+      user_roles: { user_id: searchIds, role: 1 },
+    },
+  });
+
+  const existingRoles = rolesRes?.user_roles || [];
+
+  if (!isAdmin) {
+    if (existingRoles.length > 0) {
+      await callDeviceApi('destroy_objects.fcgi', {
+        object: 'user_roles',
+        where: {
+          user_roles: { user_id: searchIds, role: 1 },
+        },
+      });
+    }
+    return;
+  }
+
+  if (existingRoles.length === 0) {
+    await callDeviceApi('create_objects.fcgi', {
+      object: 'user_roles',
+      values: [
+        {
+          user_id: targetUserId,
+          role: 1,
+        },
+      ],
+    });
+  } else if (originalId !== targetUserId) {
+    await callDeviceApi('modify_objects.fcgi', {
+      object: 'user_roles',
+      values: { user_id: targetUserId, role: 1 },
+      where: {
+        user_roles: { user_id: originalId, role: 1 },
+      },
+    });
+  }
+}
+// =========================================================================================================
 
 app.get('/api/status', (req, res) => {
   const config = getAddonConfig();
   res.json({
-    device_ip: config.device_ip,
-    use_mock: config.use_mock,
+    device_ip: config.device_ip
   });
 });
 
 app.get('/api/users', async (req, res) => {
   const config = getAddonConfig();
 
-  if (config.use_mock) {
-    // pequeno atraso quando se usa mock
-    await new Promise((r) => setTimeout(r, 250));
-    return res.json(mockUsers);
+  try {
+    // https://www.controlid.com.br/docs/access-api-pt/objetos/carregar-objetos/
+    const dataUsers = await callDeviceApi('load_objects.fcgi', { object: 'users' });
+    const dataCards = await callDeviceApi('load_objects.fcgi', { object: 'cards' });
+    const dataPins = await callDeviceApi('load_objects.fcgi', { object: 'pins' });
+    const dataUserRoles = await callDeviceApi('load_objects.fcgi', { object: 'user_roles' });
+    const dataUserListImage = await callDeviceApi('user_list_images.fcgi', { object: 'user_roles' });
+
+    // Combina os campos [https://stackoverflow.com/questions/49915304/how-to-join-two-arrays-conditionally]
+    dataCards.cards?.forEach( card => {
+      let idx = dataUsers.users?.findIndex( ({ id }) => card.user_id == id );  
+      
+      // Se o cartão não está vinculado à um usuário, ignora (em teoria não acontece)
+      if( idx !== -1 ){
+        dataUsers.users[ idx ].card = card.value;
+      }
+    });
+
+    dataPins.pins?.forEach( pin => {
+      let idx = dataUsers.users?.findIndex( ({ id }) => pin.user_id == id );  
+      
+      if( idx !== -1 ){
+        dataUsers.users[ idx ].pin = pin.value;
+      }
+    });
+
+    dataUserRoles.user_roles?.forEach( user_role => {
+      let idx = dataUsers.users?.findIndex( ({ id }) => user_role.user_id == id );  
+      
+      if( idx !== -1 ){
+        dataUsers.users[ idx ].admin = user_role.role;
+      }
+    });
+
+    dataUserListImage.user_ids?.forEach( user_id => {
+      let idx = dataUsers.users?.findIndex( ({ id }) => user_id == id );  
+      
+      if( idx !== -1 ){
+        dataUsers.users[ idx ].has_image = true;
+      }
+    });
+
+    const usersList = Array.isArray(dataUsers) ? dataUsers : dataUsers.users || [];
+    res.json(usersList);
+  } catch (error) {
+    handleApiError(res, error);
+  }
+});
+
+app.get('/api/user_get_image', async (req, res) => {
+  const config = getAddonConfig();
+  const rawUserId = req.query.user_id;
+
+  if (!rawUserId || Number.isNaN(Number(rawUserId))) {
+    return res.status(400).json({
+      error: 'Invalid user_id',
+      code: 1,
+    });
+  }
+
+  const userId = Number(rawUserId);
+
+  try {
+    const session = await getValidSession(config);
+    const url = `http://${config.device_ip}/user_get_image.fcgi?session=${encodeURIComponent(
+      session
+    )}&user_id=${userId}&get_timestamp=1`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      signal: AbortSignal.timeout(6000),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (response.status === 400) {
+      return res.status(400).json({
+        error: data.error || 'User does not have an image',
+        code: data.code ?? 1,
+      });
+    }
+
+    if (!response.ok) {
+      if (response.status === 401) cachedSession = null;
+      throw new DeviceApiError(
+        `Erro HTTP ${response.status} ao buscar imagem do usuário.`,
+        response.status,
+        'DEVICE_HTTP_ERROR'
+      );
+    }
+
+    return res.json({
+      timestamp: Number(data.timestamp) || 0,
+      image: data.image || '',
+    });
+  } catch (error) {
+    handleApiError(res, error);
+  }
+});
+
+app.get('/api/get_screenshot', async (req, res) => {
+  const config = getAddonConfig();
+
+  try {
+    const session = await getValidSession(config);
+    const url = `http://${config.device_ip}/save_screenshot.fcgi?session=${encodeURIComponent(
+      session
+    )}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        frame_type: 'camera',
+        camera: 'rgb',
+        format_type: 'base64',
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) cachedSession = null;
+      throw new DeviceApiError(
+        `Erro HTTP ${response.status} ao capturar screenshot da câmera.`,
+        response.status,
+        'SCREENSHOT_ERROR'
+      );
+    }
+
+    const rawText = await response.text();
+    let imageBase64 = rawText.trim();
+
+    try {
+      const parsed = JSON.parse(rawText);
+      imageBase64 = parsed.image || parsed.screenshot || parsed.data || '';
+    } catch {
+    }
+
+    if (!imageBase64) {
+      throw new DeviceApiError(
+        'O equipamento não retornou dados de imagem na captura.',
+        502,
+        'EMPTY_SCREENSHOT'
+      );
+    }
+
+    return res.json({
+      image: imageBase64,
+      timestamp: Math.floor(Date.now() / 1000),
+    });
+  } catch (error) {
+    handleApiError(res, error);
+  }
+});
+
+app.post('/api/set_userimage', async (req, res) => {
+  const config = getAddonConfig();
+  const { user_id, image, timestamp } = req.body;
+
+  console.log("Recebeu as informações. ");
+  if (!user_id || Number.isNaN(Number(user_id))) {
+    return res.status(400).json({
+      user_id: null,
+      success: false,
+      errors: enrichFaceErrors([{ code: 1, message: 'Invalid user_id' }]),
+    });
+  }
+
+  const uid = Number(user_id);
+  const ts = timestamp ? Number(timestamp) : Math.floor(Date.now() / 1000);
+
+  // Exclusão de foto
+  if (!image) {
+    if (config.use_mock) {
+      delete mockUserImages[uid];
+      return res.json({ user_id: uid, success: true, errors: [], timestamp: 0 });
+    }
+    try {
+      await callDeviceApi('user_destroy_image.fcgi', { user_id: uid });
+      return res.json({ user_id: uid, success: true, errors: [], timestamp: 0 });
+    } catch (error) {
+      return handleApiError(res, error);
+    }
+  }
+
+  // Remove o prefixo "data:image/...;base64,"
+  const cleanBase64 = image.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+  const binaryBuffer = Buffer.from(cleanBase64, 'base64');
+
+  if (!binaryBuffer.length) {
+    return res.status(400).json({
+      user_id: uid,
+      success: false,
+      errors: enrichFaceErrors([
+        {
+          code: 1,
+          message: 'Image file not recognized. Image should be either JPG or PNG.',
+        },
+      ]),
+    });
   }
 
   try {
-    // https://www.controlid.com.br/docs/access-api-pt/objetos/carregar-objetos/
-    const data = await callDeviceApi('load_objects.fcgi', { object: 'users' });
-    const usersList = Array.isArray(data) ? data : data.users || [];
-    res.json(usersList);
+    const session = await getValidSession(config);
+    const query = new URLSearchParams({
+      session,
+      user_id: String(uid),
+      timestamp: String(ts),
+      match: '1',
+    });
+
+    const url = `http://${config.device_ip}/user_set_image.fcgi?${query.toString()}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(binaryBuffer.length),
+      },
+      body: binaryBuffer,
+      signal: AbortSignal.timeout(10000),
+    });
+
+    const data = await response.json().catch(() => null);
+
+    if (!data) {
+      if (response.status === 401) cachedSession = null;
+      throw new DeviceApiError(
+        `Resposta inválida do Control iD em user_set_image.fcgi (HTTP ${response.status}).`,
+        response.status || 502,
+        'SET_IMAGE_ERROR'
+      );
+    }
+
+    const enrichedErrors = enrichFaceErrors(data.errors || []);
+    const payload = {
+      user_id: data.user_id ?? uid,
+      scores: data.scores || null,
+      success: Boolean(data.success),
+      errors: enrichedErrors,
+    };
+
+    if (!payload.success) {
+      return res.status(422).json(payload);
+    }
+
+    return res.json(payload);
   } catch (error) {
     handleApiError(res, error);
   }
@@ -256,37 +598,64 @@ app.get('/api/users', async (req, res) => {
 
 app.put('/api/users/:id', async (req, res) => {
   const config = getAddonConfig();
-  const userId = Number(req.params.id);
-  const { name, registration, user_type_id } = req.body;
-
-  if (config.use_mock) {
-    const idx = mockUsers.findIndex((u) => u.id === userId);
-    if (idx === -1) {
-      return res.status(404).json({ error: 'Usuário não encontrado no mock.' });
-    }
-    mockUsers[idx] = {
-      ...mockUsers[idx],
-      name,
-      registration,
-      user_type_id: user_type_id === 1 ? 1 : null,
-    };
-    return res.json(mockUsers[idx]);
-  }
+  const originalId = Number(req.params.id);
+  const { id, name, registration, user_type_id, card, pin, admin } = req.body;
+  const targetUserId = id !== undefined && id !== null ? Number(id) : originalId;
 
   try {
-    // https://www.controlid.com.br/docs/access-api-pt/objetos/modificar-objetos/
-    const result = await callDeviceApi('modify_objects.fcgi', {
+    const userValues = {
+      id: targetUserId,
+      name,
+      user_type_id: user_type_id === 1 ? 1 : null,
+    };
+    if (registration !== undefined) {
+      userValues.registration = registration;
+    }
+
+    const userResult = await callDeviceApi('modify_objects.fcgi', {
       object: 'users',
-      values: {
-        name,
-        registration,
-        user_type_id: user_type_id === 1 ? 1 : null,
-      },
+      values: userValues,
       where: {
-        users: { id: userId },
+        users: { id: originalId },
       },
     });
-    res.json(result);
+
+    if (card !== undefined) {
+      const parsedCard =
+        card !== null && String(card).trim() !== '' ? Number(card) : null;
+
+      await syncUserCredentialObject({
+        objectName: 'cards',
+        originalId,
+        targetUserId,
+        newValue: parsedCard,
+      });
+    }
+
+    if (pin !== undefined) {
+      const parsedPin =
+        pin !== null && String(pin).trim() !== '' ? String(pin).trim() : null;
+
+      await syncUserCredentialObject({
+        objectName: 'pins',
+        originalId,
+        targetUserId,
+        newValue: parsedPin,
+      });
+    }
+
+    if (admin !== undefined) {
+      await syncUserAdminRole({
+        originalId,
+        targetUserId,
+        isAdmin: Boolean(admin),
+      });
+    }
+
+    res.json({
+      success: true,
+      user: userResult,
+    });
   } catch (error) {
     handleApiError(res, error);
   }
@@ -296,19 +665,32 @@ app.delete('/api/users/:id', async (req, res) => {
   const config = getAddonConfig();
   const userId = Number(req.params.id);
 
-  if (config.use_mock) {
-    mockUsers = mockUsers.filter((u) => u.id !== userId);
-    return res.json({ success: true });
-  }
-
   try {
-    // https://www.controlid.com.br/docs/access-api-pt/objetos/destruir-objetos/
+    await Promise.allSettled([
+      callDeviceApi('destroy_objects.fcgi', {
+        object: 'cards',
+        where: { cards: { user_id: userId } },
+      }),
+      callDeviceApi('destroy_objects.fcgi', {
+        object: 'pins',
+        where: { pins: { user_id: userId } },
+      }),
+      callDeviceApi('destroy_objects.fcgi', {
+        object: 'user_roles',
+        where: { user_roles: { user_id: userId } },
+      }),
+      callDeviceApi('user_destroy_image.fcgi', {
+        user_id: userId,
+      }),
+    ]);
+
     const result = await callDeviceApi('destroy_objects.fcgi', {
       object: 'users',
       where: {
         users: { id: userId },
       },
     });
+
     res.json(result);
   } catch (error) {
     handleApiError(res, error);
@@ -338,9 +720,11 @@ app.use((req, res, next) => {
 // Inicializa o servidor
 const server =  app.listen(PORT, () => {
   const cfg = getAddonConfig();
-  log('INFO', `ControlID Addon rodando na porta ${PORT} | Modo: ${cfg.use_mock ? 'MOCK' : 'REAL'}`);
+  log('INFO', `ControlID Addon rodando na porta ${PORT}`);
   runNetworkDiagnostics(cfg);
 });
+
+// ==============================================================================================
 
 // Encerramento
 function shutdown(signal) {
