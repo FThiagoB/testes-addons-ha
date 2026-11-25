@@ -96,7 +96,7 @@ export default function EditUserModal({ user, onClose, onSave }) {
 
   const hasPhotoChanged = photoBase64 !== initialPhotoState.base64 || photoTimestamp !== initialPhotoState.timestamp;
   const hasChanges = userId.trim() !== initialId.trim() || name.trim() !== initialName.trim() || pin.trim() !== initialPin.trim() || card.trim() !== initialCard.trim() || isAdmin !== initialAdmin ||  hasPhotoChanged;
-  const isFormValid = name.trim().length > 0 && Number(userId) > 0;
+  const isFormValid = name.trim().length > 0 && Number(userId) >= 0;
 
   function handleFileUpload(e) {
     const file = e.target.files?.[0];
@@ -186,7 +186,7 @@ export default function EditUserModal({ user, onClose, onSave }) {
       }
     }
 
-    // 2. Salva os dados cadastrais do usuário
+    // Salva os dados cadastrais do usuário
     const success = await onSave(user.id, {
       id: Number(userId),
       name: name.trim(),
@@ -323,7 +323,7 @@ export default function EditUserModal({ user, onClose, onSave }) {
                 <input
                   type="number"
                   required
-                  min="1"
+                  min="0"
                   placeholder="Ex: 1001"
                   value={userId}
                   onChange={(e) => setUserId(e.target.value)}

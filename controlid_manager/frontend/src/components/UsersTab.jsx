@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
-import {RefreshCw,Pencil,Trash2,Users,ShieldAlert,WifiOff,Search,ScanFace,Numbers,IdCardLanyard} from 'lucide-react';
+import {RefreshCw,Pencil,Trash2,Users,ShieldAlert,WifiOff,Search,ScanFace,Numbers,IdCardLanyard,UserPlus} from 'lucide-react';
 import { useControlId } from '../context/ControlIdContext';
 
 import EditUserModal from './EditUserModal';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
+import CreateUserModal from './CreateUserModal';
 
 export default function UsersTab() {
-  const { users, loading, error, fetchUsers, updateUser, deleteUser } = useControlId();
+  const { users, loading, error, fetchUsers, updateUser, deleteUser, createUser } = useControlId();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [editingUser, setEditingUser] = useState(null);
   const [deletingUser, setDeletingUser] = useState(null);
+  const [showCreateModal, setShowCreateModal] = useState(null);
 
   function formatUnixTimestamp(ts) {
     if (!ts || ts === 0) return 'Nunca acessou';
@@ -53,7 +55,18 @@ export default function UsersTab() {
             </h2>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5 ml-auto">
+          <div className="flex flex-wrap items-center gap-2.5 m-auto sm:ml-auto sm:mr-0">
+
+            {/* Novo Usuário */}
+            <button
+              type="button"
+              onClick={() => setShowCreateModal(true)}
+              disabled={loading}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-green-700 transition hover:bg-green-50 active:bg-green-100 disabled:opacity-60"
+            >
+              <UserPlus className="h-4 w-4"/>
+              <span>Novo Usuário</span>
+            </button>
 
             {/* Refresh */}
             <button
@@ -104,9 +117,9 @@ export default function UsersTab() {
                   <tr className="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold uppercase tracking-wider text-slate-500">
                     <th className="px-5 py-3.5">ID</th>
                     <th className="px-5 py-3.5">Nome</th>
-                    <th className="px-5 py-3.5">Cartão</th>
-                    <th className="px-5 py-3.5">Último Acesso</th>
-                    <th className="px-5 py-3.5">Métodos de Acesso</th>
+                    <th className="hidden px-5 py-3.5 lg:table-cell">Cartão</th>
+                    <th className="hidden px-5 py-3.5 md:table-cell">Último Acesso</th>
+                    <th className="hidden px-5 py-3.5 md:table-cell">Métodos de Acesso</th>
                     <th className="px-5 py-3.5 text-right">Ações</th>
                   </tr>
                 </thead>
@@ -121,13 +134,13 @@ export default function UsersTab() {
                         <td className="px-5 py-4">
                           <div className="h-4 w-44 rounded bg-slate-200" />
                         </td>
-                        <td className="px-5 py-4">
+                        <td className="hidden px-5 py-4 lg:table-cell">
                           <div className="h-4 w-24 rounded bg-slate-200" />
                         </td>
-                        <td className="px-5 py-4">
+                        <td className="hidden px-5 py-4 md:table-cell">
                           <div className="h-5 w-20 rounded-full bg-slate-200" />
                         </td>
-                        <td className="px-5 py-4">
+                        <td className="hidden px-5 py-4 md:table-cell">
                           <div className="h-4 w-32 rounded bg-slate-200" />
                         </td>
                         <td className="px-5 py-4 text-right">
@@ -148,14 +161,14 @@ export default function UsersTab() {
                         <td className="px-5 py-3.5 font-medium text-slate-900">
                           {user.name}
                         </td>
-                        <td className="px-5 py-3.5 font-mono text-xs text-slate-600">
+                        <td className="hidden px-5 py-3.5 text-slate-600 lg:table-cell font-mono text-xs text-slate-600">
                           {intToWiegand(user.card) || '—'}
                         </td>
-                        <td className="px-5 py-3.5 text-slate-600">
+                        <td className="hidden px-5 py-3.5 md:table-cell text-slate-600">
                           {formatUnixTimestamp(user.last_access)}
                         </td>
 
-                        <td className="px-5 py-3.5 font-mono text-xs text-slate-600 text-center">
+                        <td className="hidden px-5 py-3.5 md:table-cell font-mono text-xs text-slate-600 text-center">
                           <div className="relative inline-flex items-center group gap-5">
                             { user.has_image && (
                               <ScanFace className="text-gray-500 hover:text-gray-800 cursor-pointer"/>
@@ -218,6 +231,14 @@ export default function UsersTab() {
         onClose={() => setDeletingUser(null)}
         onConfirm={deleteUser}
       />
+
+      <CreateUserModal
+        show={showCreateModal}
+        onClose={() => setShowCreateModal(null)}
+        onSave={createUser}
+      />
+
+      
     </div>
   );
 }

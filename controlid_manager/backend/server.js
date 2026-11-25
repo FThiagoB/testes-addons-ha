@@ -178,7 +178,7 @@ async function getValidSession(config) {
 }
 
 // Função generica para chamar uma rota
-async function callDeviceApi(endpoint, payload, params="") {
+async function callDeviceApi(endpoint, payload, params="", exit_on_error = true) {
   const config = getAddonConfig();
   const session = await getValidSession(config);
   var url = `http://${config.device_ip}/${endpoint}?session=${session}`;
@@ -196,20 +196,26 @@ async function callDeviceApi(endpoint, payload, params="") {
     });
   } catch (err) {
     console.log( err );
-    throw new DeviceApiError(
-      `Falha de comunicação ao chamar ${endpoint} no equipamento.`,
-      502,
-      'REQUEST_ERROR'
-    );
+    if (exit_on_error)
+      throw new DeviceApiError(
+        `Falha de comunicação ao chamar ${endpoint} no equipamento.`,
+        502,
+        'REQUEST_ERROR'
+      );
+    else
+      return express.json({error: 502, message: `Falha de comunicação ao chamar ${endpoint} no equipamento.`})
   }
 
   if (!response.ok) {
     if (response.status === 401) cachedSession = null;
-    throw new DeviceApiError(
-      `O equipamento recusou a requisição em ${endpoint} (HTTP ${response.status}).`,
-      response.status,
-      'DEVICE_HTTP_ERROR'
-    );
+    if (exit_on_error)
+      throw new DeviceApiError(
+        `O equipamento recusou a requisição em ${endpoint} (HTTP ${response.status}).`,
+        response.status,
+        'DEVICE_HTTP_ERROR'
+      );
+    else
+      return express.json({error: response.status, message: `O equipamento recusou a requisição em ${endpoint} (HTTP ${response.status}).`})
   }
 
   return response.json();
@@ -341,109 +347,6 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-app.get('/api/users', async (req, res) => {
-  const config = getAddonConfig();
-
-  try {
-    // https://www.controlid.com.br/docs/access-api-pt/objetos/carregar-objetos/
-    const dataUsers = await callDeviceApi('load_objects.fcgi', { object: 'users' });
-    const dataCards = await callDeviceApi('load_objects.fcgi', { object: 'cards' });
-    const dataPins = await callDeviceApi('load_objects.fcgi', { object: 'pins' });
-    const dataUserRoles = await callDeviceApi('load_objects.fcgi', { object: 'user_roles' });
-    const dataUserListImage = await callDeviceApi('user_list_images.fcgi', { object: 'user_roles' });
-
-    // Combina os campos [https://stackoverflow.com/questions/49915304/how-to-join-two-arrays-conditionally]
-    dataCards.cards?.forEach( card => {
-      let idx = dataUsers.users?.findIndex( ({ id }) => card.user_id == id );  
-      
-      // Se o cartão não está vinculado à um usuário, ignora (em teoria não acontece)
-      if( idx !== -1 ){
-        dataUsers.users[ idx ].card = card.value;
-      }
-    });
-
-    dataPins.pins?.forEach( pin => {
-      let idx = dataUsers.users?.findIndex( ({ id }) => pin.user_id == id );  
-      
-      if( idx !== -1 ){
-        dataUsers.users[ idx ].pin = pin.value;
-      }
-    });
-
-    dataUserRoles.user_roles?.forEach( user_role => {
-      let idx = dataUsers.users?.findIndex( ({ id }) => user_role.user_id == id );  
-      
-      if( idx !== -1 ){
-        dataUsers.users[ idx ].admin = user_role.role;
-      }
-    });
-
-    dataUserListImage.user_ids?.forEach( user_id => {
-      let idx = dataUsers.users?.findIndex( ({ id }) => user_id == id );  
-      
-      if( idx !== -1 ){
-        dataUsers.users[ idx ].has_image = true;
-      }
-    });
-
-    const usersList = Array.isArray(dataUsers) ? dataUsers : dataUsers.users || [];
-    res.json(usersList);
-  } catch (error) {
-    handleApiError(res, error);
-  }
-});
-
-app.get('/api/user_get_image', async (req, res) => {
-  const config = getAddonConfig();
-  const rawUserId = req.query.user_id;
-
-  if (!rawUserId || Number.isNaN(Number(rawUserId))) {
-    return res.status(400).json({
-      error: 'Invalid user_id',
-      code: 1,
-    });
-  }
-
-  const userId = Number(rawUserId);
-
-  try {
-    const session = await getValidSession(config);
-    const url = `http://${config.device_ip}/user_get_image.fcgi?session=${encodeURIComponent(
-      session
-    )}&user_id=${userId}&get_timestamp=1`;
-
-    const response = await fetch(url, {
-      method: 'GET',
-      signal: AbortSignal.timeout(6000),
-    });
-
-    const data = await response.json().catch(() => ({}));
-
-    if (response.status === 400) {
-      return res.status(400).json({
-        error: data.error || 'User does not have an image',
-        code: data.code ?? 1,
-      });
-    }
-
-    if (!response.ok) {
-      if (response.status === 401) cachedSession = null;
-      throw new DeviceApiError(
-        `Erro HTTP ${response.status} ao buscar imagem do usuário.`,
-        response.status,
-        'DEVICE_HTTP_ERROR'
-      );
-    }
-
-    return res.json({
-      timestamp: Number(data.timestamp) || 0,
-      image: data.image || '',
-    });
-  } catch (error) {
-    handleApiError(res, error);
-  }
-});
-
 app.get('/api/get_screenshot', async (req, res) => {
   const config = getAddonConfig();
 
@@ -499,98 +402,110 @@ app.get('/api/get_screenshot', async (req, res) => {
   }
 });
 
-app.post('/api/set_userimage', async (req, res) => {
+app.post("/api/users", async (req, res) => {
   const config = getAddonConfig();
-  const { user_id, image, timestamp } = req.body;
+  const { id, name, card, pin, admin } = req.body;
 
-  console.log("Recebeu as informações. ");
-  if (!user_id || Number.isNaN(Number(user_id))) {
-    return res.status(400).json({
-      user_id: null,
-      success: false,
-      errors: enrichFaceErrors([{ code: 1, message: 'Invalid user_id' }]),
-    });
+  if (
+    typeof id !== 'number' ||
+    !Number.isFinite(id) ||
+    typeof name !== 'string' ||
+    name.trim() === '' ||
+    typeof admin !== 'boolean' ||
+    (pin !== undefined && pin !== null && typeof pin !== 'string') ||
+    (card !== undefined && card !== null && typeof card !== 'string')
+  ) {
+    return res.status(400).json({ error: 'Dados inválidos.' });
   }
 
-  const uid = Number(user_id);
-  const ts = timestamp ? Number(timestamp) : Math.floor(Date.now() / 1000);
-
-  // Exclusão de foto
-  if (!image) {
-    if (config.use_mock) {
-      delete mockUserImages[uid];
-      return res.json({ user_id: uid, success: true, errors: [], timestamp: 0 });
-    }
-    try {
-      await callDeviceApi('user_destroy_image.fcgi', { user_id: uid });
-      return res.json({ user_id: uid, success: true, errors: [], timestamp: 0 });
-    } catch (error) {
-      return handleApiError(res, error);
-    }
-  }
-
-  // Remove o prefixo "data:image/...;base64,"
-  const cleanBase64 = image.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
-  const binaryBuffer = Buffer.from(cleanBase64, 'base64');
-
-  if (!binaryBuffer.length) {
-    return res.status(400).json({
-      user_id: uid,
-      success: false,
-      errors: enrichFaceErrors([
-        {
-          code: 1,
-          message: 'Image file not recognized. Image should be either JPG or PNG.',
-        },
-      ]),
-    });
-  }
+  let newCard = null;
+  let newPin = null;
 
   try {
-    const session = await getValidSession(config);
-    const query = new URLSearchParams({
-      session,
-      user_id: String(uid),
-      timestamp: String(ts),
-      match: '1',
+    // Cria o usuário
+    const userResult = await callDeviceApi('create_objects.fcgi', {
+      object: "users",
+      values: [{ id, name: name.trim(), registration: "" }]
     });
 
-    const url = `http://${config.device_ip}/user_set_image.fcgi?${query.toString()}`;
+    // Vincula o cartão, se informado
+    if (card !== undefined && card !== null && card !== '') {
+      newCard = await callDeviceApi('create_objects.fcgi', {
+        object: "cards",
+        values: [{ user_id: id, value: card }]
+      }, "", false);
+    }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'Content-Length': String(binaryBuffer.length),
-      },
-      body: binaryBuffer,
-      signal: AbortSignal.timeout(10000),
+    // Vincula o PIN, se informado
+    if (pin !== undefined && pin !== null && pin !== '') {
+      newPin = await callDeviceApi('create_objects.fcgi', {
+        object: "pins",
+        values: [{ user_id: id, value: pin }]
+      }, "", false);
+    }
+
+    // Vincula a role
+    const newRole = await callDeviceApi('create_objects.fcgi', {
+      object: "user_roles",
+      values: [{ user_id: id, role: admin ? 1 : 0 }]
+    }, "", false);
+
+    return res.status(201).json({
+      success: true
     });
 
-    const data = await response.json().catch(() => null);
+  } catch (error) {
+    handleApiError(res, error);
+  }
+});
 
-    if (!data) {
-      if (response.status === 401) cachedSession = null;
-      throw new DeviceApiError(
-        `Resposta inválida do Control iD em user_set_image.fcgi (HTTP ${response.status}).`,
-        response.status || 502,
-        'SET_IMAGE_ERROR'
-      );
-    }
+app.get('/api/users', async (req, res) => {
+  const config = getAddonConfig();
 
-    const enrichedErrors = enrichFaceErrors(data.errors || []);
-    const payload = {
-      user_id: data.user_id ?? uid,
-      scores: data.scores || null,
-      success: Boolean(data.success),
-      errors: enrichedErrors,
-    };
+  try {
+    // https://www.controlid.com.br/docs/access-api-pt/objetos/carregar-objetos/
+    const dataUsers = await callDeviceApi('load_objects.fcgi', { object: 'users' });
+    const dataCards = await callDeviceApi('load_objects.fcgi', { object: 'cards' });
+    const dataPins = await callDeviceApi('load_objects.fcgi', { object: 'pins' });
+    const dataUserRoles = await callDeviceApi('load_objects.fcgi', { object: 'user_roles' });
+    const dataUserListImage = await callDeviceApi('user_list_images.fcgi', { object: 'user_roles' });
 
-    if (!payload.success) {
-      return res.status(422).json(payload);
-    }
+    // Combina os campos [https://stackoverflow.com/questions/49915304/how-to-join-two-arrays-conditionally]
+    dataCards.cards?.forEach( card => {
+      let idx = dataUsers.users?.findIndex( ({ id }) => card.user_id == id );  
+      
+      // Se o cartão não está vinculado à um usuário, ignora (em teoria não acontece)
+      if( idx !== -1 ){
+        dataUsers.users[ idx ].card = card.value;
+      }
+    });
 
-    return res.json(payload);
+    dataPins.pins?.forEach( pin => {
+      let idx = dataUsers.users?.findIndex( ({ id }) => pin.user_id == id );  
+      
+      if( idx !== -1 ){
+        dataUsers.users[ idx ].pin = pin.value;
+      }
+    });
+
+    dataUserRoles.user_roles?.forEach( user_role => {
+      let idx = dataUsers.users?.findIndex( ({ id }) => user_role.user_id == id );  
+      
+      if( idx !== -1 ){
+        dataUsers.users[ idx ].admin = user_role.role;
+      }
+    });
+
+    dataUserListImage.user_ids?.forEach( user_id => {
+      let idx = dataUsers.users?.findIndex( ({ id }) => user_id == id );  
+      
+      if( idx !== -1 ){
+        dataUsers.users[ idx ].has_image = true;
+      }
+    });
+
+    const usersList = Array.isArray(dataUsers) ? dataUsers : dataUsers.users || [];
+    res.json(usersList);
   } catch (error) {
     handleApiError(res, error);
   }
@@ -692,6 +607,154 @@ app.delete('/api/users/:id', async (req, res) => {
     });
 
     res.json(result);
+  } catch (error) {
+    handleApiError(res, error);
+  }
+});
+
+app.get('/api/user_get_image', async (req, res) => {
+  const config = getAddonConfig();
+  const rawUserId = req.query.user_id;
+
+  if (!rawUserId || Number.isNaN(Number(rawUserId))) {
+    return res.status(400).json({
+      error: 'Invalid user_id',
+      code: 1,
+    });
+  }
+
+  const userId = Number(rawUserId);
+
+  try {
+    const session = await getValidSession(config);
+    const url = `http://${config.device_ip}/user_get_image.fcgi?session=${encodeURIComponent(
+      session
+    )}&user_id=${userId}&get_timestamp=1`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      signal: AbortSignal.timeout(6000),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (response.status === 400) {
+      return res.status(400).json({
+        error: data.error || 'User does not have an image',
+        code: data.code ?? 1,
+      });
+    }
+
+    if (!response.ok) {
+      if (response.status === 401) cachedSession = null;
+      throw new DeviceApiError(
+        `Erro HTTP ${response.status} ao buscar imagem do usuário.`,
+        response.status,
+        'DEVICE_HTTP_ERROR'
+      );
+    }
+
+    return res.json({
+      timestamp: Number(data.timestamp) || 0,
+      image: data.image || '',
+    });
+  } catch (error) {
+    handleApiError(res, error);
+  }
+});
+
+app.post('/api/set_userimage', async (req, res) => {
+  const config = getAddonConfig();
+  const { user_id, image, timestamp } = req.body;
+
+  console.log("Recebeu as informações. ");
+  if (!user_id || Number.isNaN(Number(user_id))) {
+    return res.status(400).json({
+      user_id: null,
+      success: false,
+      errors: enrichFaceErrors([{ code: 1, message: 'Invalid user_id' }]),
+    });
+  }
+
+  const uid = Number(user_id);
+  const ts = timestamp ? Number(timestamp) : Math.floor(Date.now() / 1000);
+
+  // Exclusão de foto
+  if (!image) {
+    if (config.use_mock) {
+      delete mockUserImages[uid];
+      return res.json({ user_id: uid, success: true, errors: [], timestamp: 0 });
+    }
+    try {
+      await callDeviceApi('user_destroy_image.fcgi', { user_id: uid });
+      return res.json({ user_id: uid, success: true, errors: [], timestamp: 0 });
+    } catch (error) {
+      return handleApiError(res, error);
+    }
+  }
+
+  // Remove o prefixo "data:image/...;base64,"
+  const cleanBase64 = image.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+  const binaryBuffer = Buffer.from(cleanBase64, 'base64');
+
+  if (!binaryBuffer.length) {
+    return res.status(400).json({
+      user_id: uid,
+      success: false,
+      errors: enrichFaceErrors([
+        {
+          code: 1,
+          message: 'Image file not recognized. Image should be either JPG or PNG.',
+        },
+      ]),
+    });
+  }
+
+  try {
+    const session = await getValidSession(config);
+    const query = new URLSearchParams({
+      session,
+      user_id: String(uid),
+      timestamp: String(ts),
+      match: '1',
+    });
+
+    const url = `http://${config.device_ip}/user_set_image.fcgi?${query.toString()}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(binaryBuffer.length),
+      },
+      body: binaryBuffer,
+      signal: AbortSignal.timeout(10000),
+    });
+
+    const data = await response.json().catch(() => null);
+
+    if (!data) {
+      if (response.status === 401) cachedSession = null;
+      throw new DeviceApiError(
+        `Resposta inválida do Control iD em user_set_image.fcgi (HTTP ${response.status}).`,
+        response.status || 502,
+        'SET_IMAGE_ERROR'
+      );
+    }
+
+    const enrichedErrors = enrichFaceErrors(data.errors || []);
+    const payload = {
+      user_id: data.user_id ?? uid,
+      scores: data.scores || null,
+      success: Boolean(data.success),
+      errors: enrichedErrors,
+    };
+
+    if (!payload.success) {
+      return res.status(422).json(payload);
+    }
+
+    return res.json(payload);
   } catch (error) {
     handleApiError(res, error);
   }
