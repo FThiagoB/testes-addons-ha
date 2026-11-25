@@ -455,6 +455,13 @@ app.post("/api/users", async (req, res) => {
       values: [{ user_id: id, role: admin ? 1 : 0 }]
     }, "", false);
 
+    // Vincula ao grupo de usuários
+    // Vincula o usuário a um usergroup
+    const newGroup = await callDeviceApi('create_objects.fcgi', {
+      object: "user_groups",
+      values: [{ user_id: id, group_id: 1 }]
+    }, "", false);
+    
     return res.status(201).json({
       success: true
     });
