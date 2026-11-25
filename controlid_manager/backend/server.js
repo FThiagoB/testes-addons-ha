@@ -461,7 +461,7 @@ app.post("/api/users", async (req, res) => {
       object: "user_groups",
       values: [{ user_id: id, group_id: 1 }]
     }, "", false);
-    
+
     return res.status(201).json({
       success: true
     });
@@ -680,7 +680,7 @@ app.post('/api/set_userimage', async (req, res) => {
   const { user_id, image, timestamp } = req.body;
 
   console.log("Recebeu as informações. ");
-  if (!user_id || Number.isNaN(Number(user_id))) {
+  if (Number.isNaN(Number(user_id))) {
     return res.status(400).json({
       user_id: null,
       success: false,

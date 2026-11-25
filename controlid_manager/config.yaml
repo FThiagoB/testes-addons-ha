@@ -1,5 +1,5 @@
 name: "ControlID Manager"
-version: "1.0.3"
+version: "1.0.4"
 slug: "controlid_manager"
 description: "Addon de teste para abstrair o consumo da API do ControlID pelo RBP"
 arch:
