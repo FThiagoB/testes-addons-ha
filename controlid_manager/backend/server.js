@@ -352,20 +352,18 @@ app.get('/api/get_screenshot', async (req, res) => {
 
   try {
     const session = await getValidSession(config);
-    const url = `http://${config.device_ip}/save_screenshot.fcgi?session=${encodeURIComponent(
-      session
-    )}`;
+    const url = `http://${config.device_ip}/save_screenshot.fcgi?session=${encodeURIComponent(session)}`;
 
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        frame_type: 'camera',
-        camera: 'rgb',
         format_type: 'base64',
       }),
       signal: AbortSignal.timeout(8000),
     });
+
+    const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
       if (response.status === 401) cachedSession = null;
@@ -376,7 +374,14 @@ app.get('/api/get_screenshot', async (req, res) => {
       );
     }
 
-    const rawText = await response.text();
+    if (response.status === 400) {
+      return res.status(400).json({
+        error: data.error || 'User does not have an image',
+        code: data.code ?? 1,
+      });
+    }
+
+    const rawText = data.image_base64;
     let imageBase64 = rawText.trim();
 
     try {
