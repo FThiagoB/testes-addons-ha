@@ -418,7 +418,7 @@ app.post("/api/users", async (req, res) => {
     name.trim() === '' ||
     typeof admin !== 'boolean' ||
     (pin !== undefined && pin !== null && typeof pin !== 'string') ||
-    (card !== undefined && card !== null && typeof card !== 'int')
+    (card !== undefined && card !== null && typeof card !== 'number')
   ) {
     return res.status(400).json({ error: 'Dados inválidos.' });
   }
