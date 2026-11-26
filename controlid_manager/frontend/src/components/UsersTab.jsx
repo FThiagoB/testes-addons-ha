@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import {RefreshCw,Pencil,Trash2,Users,ShieldAlert,WifiOff,Search,ScanFace,Numbers,IdCardLanyard,UserPlus} from 'lucide-react';
 import { useControlId } from '../context/ControlIdContext';
 
-import EditUserModal from './EditUserModal';
-import ConfirmDeleteModal from './ConfirmDeleteModal';
-import CreateUserModal from './CreateUserModal';
+import EditUserModal from './modals/EditUserModal';
+import ConfirmDeleteModal from './modals/ConfirmDeleteModal';
+import CreateUserModal from './modals/CreateUserModal';
 
 export default function UsersTab() {
   const { users, loading, error, fetchUsers, updateUser, deleteUser, createUser } = useControlId();
@@ -71,7 +71,7 @@ export default function UsersTab() {
             {/* Refresh */}
             <button
               type="button"
-              onClick={() => fetchUsers(true)}
+              onClick={() =>  fetchUsers(true)}
               disabled={loading}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 active:bg-slate-100 disabled:opacity-60"
             >
@@ -100,7 +100,7 @@ export default function UsersTab() {
             </p>
             <button
               type="button"
-              onClick={() => fetchUsers(true)}
+              onClick={() =>  fetchUsers(true)}
               className="mt-5 inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700"
             >
               <RefreshCw className="h-4 w-4" />

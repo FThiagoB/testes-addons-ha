@@ -23,7 +23,7 @@ export function ControlIdProvider({ children }) {
 
     try {
       const [statusRes, usersRes] = await Promise.all([
-        fetch("api/status"),
+        fetch("api/device/status"),
         fetch("api/users"),
       ]);
 
@@ -71,73 +71,166 @@ export function ControlIdProvider({ children }) {
     fetchUsers(false);
   }, [fetchUsers]);
 
-  const updateUser = async (id, payload) => {
-    try {
-      const res = await fetch(`api/users/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+  const createUser = useCallback(
+    async (payload) => {
+      try {
+        const res = await fetch("api/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data.error || "Erro ao atualizar o usuário.");
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || "Erro ao criar o usuário.");
+        }
+
+        toast.success("Usuário criado com sucesso!");
+        await fetchUsers(false);
+        return true;
+      } catch (err) {
+        toast.error(err.message);
+        return false;
       }
+    },
+    [fetchUsers]
+  );
 
-      toast.success("Usuário atualizado com sucesso!");
-      await fetchUsers(false);
-      return true;
-    } catch (err) {
-      toast.error(err.message);
-      return false;
-    }
-  };
+  const updateUser = useCallback(
+    async (id, payload) => {
+      try {
+        const res = await fetch(`api/users/${encodeURIComponent(id)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
 
-  const createUser = async (payload) => {
-    try {
-      console.log("Dentro de createUser(), fazendo o fetch ");
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || "Erro ao atualizar o usuário.");
+        }
 
-      const res = await fetch(`api/users`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      console.log("Fetch retornou");
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data.error || "Erro ao criar o usuário.");
+        toast.success("Usuário atualizado com sucesso!");
+        await fetchUsers(false);
+        return true;
+      } catch (err) {
+        toast.error(err.message);
+        return false;
       }
+    },
+    [fetchUsers]
+  );
 
-      toast.success("Usuário criado com sucesso!");
-      await fetchUsers(false);
-      return true;
-    } catch (err) {
-      toast.error(err.message);
-      return false;
+  const deleteUser = useCallback(
+    async (id) => {
+      try {
+        const res = await fetch(`api/users/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || "Erro ao excluir o usuário.");
+        }
+
+        toast.success("Usuário excluído com sucesso.");
+        await fetchUsers(false);
+        return true;
+      } catch (err) {
+        toast.error(err.message);
+        return false;
+      }
+    },
+    [fetchUsers]
+  );
+
+  // --- Imagens do Usuário ---
+  const getUserImage = useCallback(async (id) => {
+    const res = await fetch(`api/users/${encodeURIComponent(id)}/image`, {cache: "no-store"});
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.image) {
+      return { image: null, timestamp: 0 };
     }
-  };
+    return {
+      image: data.image,
+      timestamp: data.timestamp || Math.floor(Date.now() / 1000),
+    };
+  }, []);
 
-  const deleteUser = async (id) => {
-    try {
-      const res = await fetch(`api/users/${id}`, {
+  const setUserImage = useCallback(async (id, { image, timestamp }) => {
+    // Se image for null/vazio, usa a rota semântica DELETE
+    if (!image) {
+      const delRes = await fetch(`api/users/${encodeURIComponent(id)}/image`, {
         method: "DELETE",
       });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data.error || "Erro ao excluir o usuário.");
+      const delData = await delRes.json().catch(() => ({}));
+      if (!delRes.ok || delData.success === false) {
+        throw new Error(delData.error || "Erro ao remover a foto do usuário.");
       }
-
-      toast.success("Usuário excluído com sucesso.");
-      await fetchUsers(false);
-      return true;
-    } catch (err) {
-      toast.error(err.message);
-      return false;
+      return delData;
     }
-  };
+
+    const rawBase64 = image.replace(
+      /^data:image\/[a-zA-Z0-9+.-]+;base64,/,
+      ""
+    );
+
+    const res = await fetch(`api/users/${encodeURIComponent(id)}/image`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image: rawBase64,
+        timestamp,
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) {
+      const firstErr = data.errors?.[0];
+      const errMsg =
+        firstErr?.friendlyMessage ||
+        firstErr?.message ||
+        data.error ||
+        "A foto não passou na validação biométrica do equipamento.";
+      throw new Error(errMsg);
+    }
+
+    return data;
+  }, []);
+
+  // --- Hardware (Control iD) ---
+  const captureDeviceScreenshot = useCallback(async () => {
+    const res = await fetch("api/device/screenshot");
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.image) {
+      throw new Error(
+        data.error || "Não foi possível capturar imagem da câmera."
+      );
+    }
+    return data;
+  }, []);
+
+  const enrollCardFromDevice = useCallback(async (signal) => {
+    const res = await fetch("api/device/enroll/card", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || "Falha ou tempo esgotado ao ler o cartão.");
+    }
+
+    return data.card;
+  }, []);
+
+  const cancelEnrollCardFromDevice = useCallback(async () => {
+    await fetch("api/device/enroll/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }).catch(() => {});
+  }, []);
 
   return (
     <ControlIdContext.Provider
@@ -147,9 +240,14 @@ export function ControlIdProvider({ children }) {
         loading,
         error,
         fetchUsers,
+        createUser,
         updateUser,
         deleteUser,
-        createUser,
+        getUserImage,
+        setUserImage,
+        captureDeviceScreenshot,
+        enrollCardFromDevice,
+        cancelEnrollCardFromDevice,
       }}
     >
       {children}
