@@ -209,7 +209,7 @@ export default function UserFormModal({
     try {
       // const data = await captureDeviceScreenshot();
       const data = await enrollFaceFromDevice();
-      const normalized = normalizeBase64Image(data.image);
+      const normalized = normalizeBase64Image(data.face);
 
       setPhotoBase64(normalized);
       setPhotoTimestamp(data.timestamp || Math.floor(Date.now() / 1000));
