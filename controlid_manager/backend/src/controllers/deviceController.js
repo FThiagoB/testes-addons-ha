@@ -26,6 +26,30 @@ async function enrollCard(req, res) {
   }
 }
 
+async function enrollFace(req, res) {
+  try {
+    const result = await deviceService.remoteEnrollFace();
+    if (!result.success) {
+      return res.status(422).json(result);
+    }
+    return res.json(result);
+  } catch (error) {
+    handleApiError(res, error);
+  }
+}
+
+async function enrollPin(req, res) {
+  try {
+    const result = await deviceService.remoteEnrollPin();
+    if (!result.success) {
+      return res.status(422).json(result);
+    }
+    return res.json(result);
+  } catch (error) {
+    handleApiError(res, error);
+  }
+}
+
 async function cancelEnroll(req, res) {
   try {
     const result = await deviceService.cancelRemoteEnroll();
@@ -39,5 +63,7 @@ module.exports = {
   getStatus,
   getScreenshot,
   enrollCard,
+  enrollFace,
+  enrollPin,
   cancelEnroll,
 };

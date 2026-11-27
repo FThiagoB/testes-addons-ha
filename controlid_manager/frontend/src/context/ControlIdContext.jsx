@@ -144,7 +144,6 @@ export function ControlIdProvider({ children }) {
     [fetchUsers]
   );
 
-  // --- Imagens do Usuário ---
   const getUserImage = useCallback(async (id) => {
     const res = await fetch(`api/users/${encodeURIComponent(id)}/image`, {cache: "no-store"});
     const data = await res.json().catch(() => ({}));
@@ -198,7 +197,6 @@ export function ControlIdProvider({ children }) {
     return data;
   }, []);
 
-  // --- Hardware (Control iD) ---
   const captureDeviceScreenshot = useCallback(async () => {
     const res = await fetch("api/device/screenshot");
     const data = await res.json().catch(() => ({}));
@@ -225,6 +223,36 @@ export function ControlIdProvider({ children }) {
     return data.card;
   }, []);
 
+  const enrollFaceFromDevice = useCallback(async (signal) => {
+    const res = await fetch("api/device/enroll/face", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || "Falha ou tempo esgotado ao capturar o rosto.");
+    }
+
+    return data.face;
+  }, []);
+
+  const enrollPinFromDevice = useCallback(async (signal) => {
+    const res = await fetch("api/device/enroll/pin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || "Falha ou tempo esgotado ao ler o pin.");
+    }
+
+    return data.pin;
+  }, []);
+
   const cancelEnrollCardFromDevice = useCallback(async () => {
     await fetch("api/device/enroll/cancel", {
       method: "POST",
@@ -247,6 +275,8 @@ export function ControlIdProvider({ children }) {
         setUserImage,
         captureDeviceScreenshot,
         enrollCardFromDevice,
+        enrollFaceFromDevice,
+        enrollPinFromDevice,
         cancelEnrollCardFromDevice,
       }}
     >

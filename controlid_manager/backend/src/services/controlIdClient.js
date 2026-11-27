@@ -8,6 +8,10 @@ function invalidateSession() {
   cachedSession = null;
 }
 
+function getCachedSession(){
+  return cachedSession;
+}
+
 async function getValidSession(config = getAddonConfig()) {
   const baseUrl = `http://${config.device_ip}`;
 
@@ -139,4 +143,4 @@ async function callDeviceApi(
   return response.json();
 }
 
-module.exports = { getValidSession, invalidateSession, callDeviceApi };
+module.exports = { getValidSession, invalidateSession, callDeviceApi, getCachedSession};

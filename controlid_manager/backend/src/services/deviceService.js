@@ -3,6 +3,7 @@ const {
   getValidSession,
   invalidateSession,
   callDeviceApi,
+  getCachedSession
 } = require('./controlIdClient');
 const { DeviceApiError } = require('../errors/DeviceApiError');
 
@@ -62,12 +63,10 @@ async function remoteEnrollCard() {
   const data = await callDeviceApi(
     'remote_enroll.fcgi',
     { type: 'card', save: false, sync: true },
-    '',
-    true,
-    25000
+    '', true, 25000
   );
 
-  const rawCard = data?.card_value ?? data?.value;
+  const rawCard = data?.card_value;
   if (!rawCard) {
     return {
       success: false,
@@ -78,8 +77,52 @@ async function remoteEnrollCard() {
   return { success: true, card: String(rawCard) };
 }
 
+async function remoteEnrollFace() {
+  const data = await callDeviceApi(
+    'remote_enroll.fcgi',
+    { type: 'face', save: false, sync: true },
+    '', true, 25000
+  );
+
+  const rawFace = data?.user_image;
+  if (!rawFace) {
+    return {
+      success: false,
+      error: data?.error || 'Problemas ao detectar a face',
+    };
+  }
+
+  return { success: true, face: rawFace };
+}
+
+async function remoteEnrollPin() {
+  const data = await callDeviceApi(
+    'remote_enroll.fcgi',
+    { type: 'pin', save: false, sync: true },
+    '', true, 25000
+  );
+
+  const rawPin = data?.pin_value;
+  if (!rawPin) {
+    return {
+      success: false,
+      error: data?.error || 'Problemas ao detectar o pin',
+    };
+  }
+
+  return { success: true, pin: rawPin };
+}
+
 async function cancelRemoteEnroll() {
-  await callDeviceApi('cancel_remote_enroll.fcgi', {}, '', false, 3000);
+  const config = getAddonConfig();
+  const session = getCachedSession() ?? await getValidSession(config);
+
+  const url = `http://${config.device_ip}/cancel_remote_enroll.fcgi?session=${encodeURIComponent(session)}`;
+  
+  await fetch(url, {
+      method: 'POST'
+    });
+
   return { success: true };
 }
 
@@ -87,5 +130,7 @@ module.exports = {
   getDeviceStatus,
   captureScreenshot,
   remoteEnrollCard,
-  cancelRemoteEnroll,
+  remoteEnrollFace,
+  remoteEnrollPin,
+  cancelRemoteEnroll
 };

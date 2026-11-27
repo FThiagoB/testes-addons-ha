@@ -49,6 +49,8 @@ export default function UserFormModal({
 
   const {
     captureDeviceScreenshot,
+    enrollFaceFromDevice,
+    enrollPinFromDevice,
     enrollCardFromDevice,
     cancelEnrollCardFromDevice,
     getUserImage,
@@ -111,9 +113,9 @@ export default function UserFormModal({
     async function loadUserImage() {
       setLoadingPhoto(true);
       try {
-        console.log(`ID usuário: ${initialUser.id} [tem imagem? ${initialUser.hasImage}]`);
+        // console.log(`ID usuário: ${initialUser.id} [tem imagem? ${initialUser.hasImage}]`);
         const data = await getUserImage(initialUser.id);
-        console.log(data);
+        // console.log(data);
 
         if (!active) return;
 
@@ -205,7 +207,8 @@ export default function UserFormModal({
   async function handleCaptureFromControlId() {
     setCapturingFromDevice(true);
     try {
-      const data = await captureDeviceScreenshot();
+      // const data = await captureDeviceScreenshot();
+      const data = await enrollFaceFromDevice();
       const normalized = normalizeBase64Image(data.image);
 
       setPhotoBase64(normalized);

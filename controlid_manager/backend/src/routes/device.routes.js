@@ -6,6 +6,8 @@ const router = Router();
 router.get('/status', deviceController.getStatus);
 router.get('/screenshot', deviceController.getScreenshot);
 router.post('/enroll/card', deviceController.enrollCard);
+router.post('/enroll/face', deviceController.enrollFace);
+router.post('/enroll/pin', deviceController.enrollPin);
 router.post('/enroll/cancel', deviceController.cancelEnroll);
 
 module.exports = router;
