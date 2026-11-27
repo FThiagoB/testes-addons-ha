@@ -66,6 +66,7 @@ export default function UserFormModal({
   // Estados de visualização e hardware
   const [isWiegandView, setIsWiegandView] = useState(false);
   const [capturingCard, setCapturingCard] = useState(false);
+  const [capturingPin, setCapturingPin] = useState(false);
   const [capturingFromDevice, setCapturingFromDevice] = useState(false);
   const [loadingPhoto, setLoadingPhoto] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -81,6 +82,7 @@ export default function UserFormModal({
 
   const fileInputRef = useRef(null);
   const cardAbortRef = useRef(null);
+  const pinAbortRef = useRef(null);
 
   // Inicialização dos campos conforme o modo
   useEffect(() => {
@@ -154,6 +156,10 @@ export default function UserFormModal({
       if (cardAbortRef.current) {
         cardAbortRef.current.abort();
         cardAbortRef.current = null;
+
+        pinAbortRef.current.abort();
+        pinAbortRef.current = null;
+
         cancelEnrollCardFromDevice();
       }
     };
@@ -210,8 +216,6 @@ export default function UserFormModal({
       // const data = await captureDeviceScreenshot();
       const data = await enrollFaceFromDevice();
       const normalized = normalizeBase64Image(data);
-      console.log(`Foi retornado: ${data}`);
-      console.log(`Normalized: ${normalized}`);
 
       setPhotoBase64(normalized);
       setPhotoTimestamp(data.timestamp || Math.floor(Date.now() / 1000));
@@ -230,6 +234,9 @@ export default function UserFormModal({
   }
 
   async function handleCaptureCard() {
+    if( capturingPin ) return;
+    if( capturingFromDevice ) return;
+
     if (capturingCard) {
       cardAbortRef.current?.abort();
       cardAbortRef.current = null;
@@ -257,6 +264,41 @@ export default function UserFormModal({
       if (cardAbortRef.current === controller) {
         cardAbortRef.current = null;
         setCapturingCard(false);
+      }
+    }
+  }
+
+  async function handleCapturePin() {
+    if( capturingCard ) return;
+    if( capturingFromDevice ) return;
+
+    if (capturingPin) {
+      pinAbortRef.current?.abort();
+      pinAbortRef.current = null;
+      setCapturingPin(false);
+      toast.info("Leitura do pin cancelada.");
+      cancelEnrollCardFromDevice();
+      return;
+    }
+
+    const controller = new AbortController();
+    pinAbortRef.current = controller;
+    setCapturingPin(true);
+    toast.info("Digite o pin desejado no equipamento Control iD...");
+
+    try {
+      const pinString = await enrollPinFromDevice(controller.signal);
+      if (controller.signal.aborted) return;
+      setPin(pinString);
+      toast.success("Pin lido com sucesso!");
+    } catch (err) {
+      if (err.name !== "AbortError" && !controller.signal.aborted) {
+        toast.error(err.message);
+      }
+    } finally {
+      if (pinAbortRef.current === controller) {
+        pinAbortRef.current = null;
+        setCapturingPin(false);
       }
     }
   }
@@ -356,7 +398,7 @@ export default function UserFormModal({
 
               <button
                 type="button"
-                disabled={loadingPhoto || capturingFromDevice}
+                disabled={loadingPhoto || capturingFromDevice || capturingCard || capturingPin}
                 onClick={handleCaptureFromControlId}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-medium text-sky-700 shadow-2xs transition hover:border-sky-300 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -424,9 +466,34 @@ export default function UserFormModal({
             </div>
 
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                PIN
-              </label>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="text-sm font-medium text-slate-700">
+                  PIN
+                </label>
+
+                <button
+                  type="button"
+                  onClick={handleCapturePin}
+                  disabled={capturingFromDevice || capturingCard}
+                  className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium transition ${
+                    capturingPin
+                      ? "bg-amber-100 text-amber-800 hover:bg-red-100 hover:text-red-700"
+                      : "bg-sky-50 text-sky-700 hover:bg-sky-100"
+                  }`}
+                >
+                  {capturingPin ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <span>Capturando... (Cancelar)</span>
+                    </>
+                  ) : (
+                    <>
+                      <Nfc className="h-3.5 w-3.5" />
+                      <span>Ler no Control iD</span>
+                    </>
+                  )}
+                </button>
+              </div>
 
               <div className="relative">
                 <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -450,6 +517,7 @@ export default function UserFormModal({
                 <button
                   type="button"
                   onClick={handleCaptureCard}
+                  disabled={capturingFromDevice || capturingPin}
                   className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium transition ${
                     capturingCard
                       ? "bg-amber-100 text-amber-800 hover:bg-red-100 hover:text-red-700"
