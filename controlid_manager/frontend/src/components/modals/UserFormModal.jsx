@@ -209,7 +209,9 @@ export default function UserFormModal({
     try {
       // const data = await captureDeviceScreenshot();
       const data = await enrollFaceFromDevice();
-      const normalized = normalizeBase64Image(data.face);
+      const normalized = normalizeBase64Image(data);
+      console.log(`Foi retornado: ${data}`);
+      console.log(`Normalized: ${normalized}`);
 
       setPhotoBase64(normalized);
       setPhotoTimestamp(data.timestamp || Math.floor(Date.now() / 1000));
