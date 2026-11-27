@@ -1,5 +1,5 @@
 name: "ControlID Manager"
-version: "1.0.11"
+version: "1.0.12"
 slug: "controlid_manager"
 description: "Addon de teste para abstrair o consumo da API do ControlID pelo RBP"
 arch:
@@ -15,7 +15,7 @@ init: true
 ingress: true
 ingress_port: 8099
 panel_icon: "mdi:door-closed-lock"
-panel_title: "ControlID"
+panel_title: "Controle Acesso"
 host_network: true
 
 options:
